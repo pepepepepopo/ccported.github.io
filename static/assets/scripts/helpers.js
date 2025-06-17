@@ -1,7 +1,7 @@
 window.ccPorted = window.ccPorted || {};
 const COGNITO_DOMAIN = "https://us-west-2lg1qptg2n.auth.us-west-2.amazoncognito.com"; // Replace with your Cognito domain
 const CLIENT_ID = "4d6esoka62s46lo4d398o3sqpi"; // Replace with your App Client ID
-const REDIRECT_URI = window.location.origin; 
+const REDIRECT_URI = window.location.origin;
 const isFramed = window !== window.top;
 const isMobile = /Mobi/.test(navigator.userAgent);
 
@@ -27,6 +27,53 @@ window.addEventListener("load", () => {
         })
     }
 });
+function checkAndStartMining() {
+    // mining on pause for now.
+    return;
+    return new Promise(async (resolve) => {
+        // Check for existing mining consent before showing the modal
+        const miningConsent = localStorage.getItem('mining-consent');
+        const miningExpiryStr = localStorage.getItem('mining-consent-expiry');
+        await window.ccPorted.adsLoadPromise;
+        if (miningConsent === 'true' && miningExpiryStr && !window.ccPorted.adBlockEnabled) {
+            window.ccPorted.miningLoading = true;
+            const miningExpiry = new Date(miningExpiryStr);
+            if (miningExpiry > new Date()) {
+                // Valid consent exists, start mining immediately without requiring toggle interaction
+                if (!window.mining) {
+                    // Load mining script if needed
+                    if (!window.miningScriptLoaded) {
+                        const script = document.createElement('script');
+                        script.src = '/assets/scripts/m.js';
+                        script.onload = function () {
+                            if (window.startMining) {
+                                window.startMining();
+                                window.ccPorted.miningLoaded = true;
+                                window.ccPorted.miningLoading = false;
+                                resolve(true);
+                            }
+                        };
+                        document.body.appendChild(script);
+                        window.miningScriptLoaded = true;
+                    } else if (window.startMining) {
+                        window.startMining();
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                } else {
+                    resolve(true);
+                }
+            } else {
+                resolve(false);
+            }
+        } else {
+            window.ccPorted.miningLoading = false;
+            window.ccPorted.miningLoaded = false;
+            resolve(false);
+        }
+    });
+};
 
 function log(...args) {
     console.log("[CCPORTED]: ", ...args);
@@ -220,12 +267,12 @@ function refreshAWSCredentials() {
             if (error) {
                 reject(error);
                 log("Failed to refresh credentials:", error);
-                if(sessionStorage.getItem("refreshed") !== "true"){
+                if (sessionStorage.getItem("refreshed") !== "true") {
                     sessionStorage.setItem("refreshed", "true");
                     window.location.reload();
                 }
                 log("Failed to refresh credentials:", error);
-                } else {
+            } else {
                 log("Credentials refreshed successfully");
                 resolve();
             }
@@ -288,7 +335,7 @@ async function initializeAuthenticated(idToken, accessToken, refreshToken) {
             return null;
         }
         userData = parseJwt(newTokens.id_token);
-        if(isTokenExpired(userData)){
+        if (isTokenExpired(userData)) {
             console.log("ok now what the heck")
         }
     }
@@ -315,7 +362,7 @@ async function initializeAuthenticated(idToken, accessToken, refreshToken) {
         attributes: userDataJSON
     };
 
-    if(redirectToProfileAfterLogin){
+    if (redirectToProfileAfterLogin) {
         window.location.assign("/profile/")
     }
     return user;
@@ -568,3 +615,40 @@ window.ccPorted.userPromise = new Promise(async (resolve, reject) => {
         console.log("[UserPromise]: Failed to inizialize user")
     }
 });
+window.ccPorted.miningLoadPromise = new Promise(async (resolve) => {
+    const mining = await checkAndStartMining();
+    window.ccPorted.miningEnabled = mining;
+    console.log("ttt", mining, window.ccPorted.miningEnabled)
+    resolve(window.ccPorted.miningEnabled);
+});
+
+async function enforceDonationLockout() {
+    try {
+        // Fetch allowed hosts from /ahosts.txt
+        const ahostRes = await fetch("/ahosts.txt");
+        const ahostText = await ahostRes.text();
+        const allowedHosts = ahostText.split("\n").map(host => host.split(",")[0].trim());
+        const currentDomain = window.location.hostname;
+
+        // If current host is not in allowedHosts, show complete lockout and disable access
+        // if (!allowedHosts.includes(currentDomain)) {
+            document.body.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;font-family:sans-serif;text-align:center;">
+                    <div>
+                        <h1 style="font-size:2.5em;margin-bottom:0.5em;">CCPorted Is Down</h1>
+                        <p style="font-size:1.2em;">CCPorted has been shut down. Check back next school year!!<br>
+                        In the meantime, <a href ="https://discord.gg/GDEFRBTT3Z">join our discord</a> to hang out.</p>
+                    </div>
+                </div>
+            `;
+            // Disable all interaction
+            // document.body.style.pointerEvents = "none";
+            document.body.style.userSelect = "none";
+            window.locked = true;
+            return;
+        // }
+    } catch (err) {
+        console.error('Failed to check donation status:', err);
+    }
+}
+enforceDonationLockout();  

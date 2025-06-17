@@ -82,7 +82,7 @@ try {
         const games = [];
         const params = {
             TableName: 'games_list',
-            ProjectionExpression: 'gameID, clicks, description, fName, tags, thumbPath',
+            ProjectionExpression: 'gameID, clicks, description, fName, tags, thumbPath, uploadedTimestamp, updatedTimestamp',
             FilterExpression: 'isOnline = :o',
             ExpressionAttributeValues: {
                 ':o': true
@@ -109,33 +109,6 @@ try {
             `;
         }
         return { games }
-    }
-    async function adsEnabled() {
-        let adBlockEnabled = false
-        const googleAdUrl = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js'
-        try {
-            await fetch(new Request(googleAdUrl)).catch(_ => adBlockEnabled = true)
-        } catch (e) {
-            adBlockEnabled = true
-        } finally {
-            if (!window.ccPorted.aHosts) {
-                const res = await fetch("/ahosts.txt");
-                const text = await res.text();
-                const hosts = text.split('\n');
-                window.ccPorted.aHosts = hosts.map(h => h.trim());
-                if (window.ccPorted.aHosts.includes(window.location.hostname)) {
-                    return !adBlockEnabled;
-                } else {
-                    return false;
-                }
-            } else {
-                if (window.ccPorted.aHosts.includes(window.location.hostname)) {
-                    return !adBlockEnabled;
-                } else {
-                    return false;
-                }
-            }
-        }
     }
     async function importJSON(path) {
         let url;
@@ -165,7 +138,7 @@ try {
         const serverList = await fetch('/servers.txt');
         const serversText = await serverList.text();
         const servers = serversText.split('\n');
-        for(const server of servers){
+        for (const server of servers) {
 
             const [address, name, path] = server.split(",");
             const toAttempt = address.trim();
@@ -215,7 +188,7 @@ try {
                     incrementClicks(id);
                     window.open(links[0].href, '_blank');
                 });
-                checkSeenGame(id, card);
+                checkSeenGame(game, card);
                 cardsCache.push(card);
                 cardsContainer.appendChild(card);
             });
@@ -263,10 +236,10 @@ try {
                         const text = await blockedRes.text();
                         if (text.indexOf("===NOT_BLOCKED===") !== -1) {
                             window.location.href = `https://${host}/`
-                        }else{
+                        } else {
                             log(`${host} failed (wrong res)`);
                         }
-                    }else{
+                    } else {
                         log(`${host} failed (res not 200)`);
                     }
                 } catch (e) {
@@ -282,20 +255,20 @@ try {
         await checkForSwitchToAHost();
         window.ccPorted = window.ccPorted || {};
         window.ccPorted.cardsRendered = false;
-        window.ccPorted.adsEnabled = await adsEnabled();
-        if (window.ccPorted.adsEnabled && window.innerWidth > 800) {
-            // add margin for the ads
-            document.querySelector(".cards").style.marginRight = "300px";
-            document.querySelector(".search").style.marginRight = "300px";
-        }
-        if (!window.ccPorted.adsEnabled) {
-            hideAds();
-        }
+        showKofiDonationModal();
+        // createNotif({
+        //     cta: {
+        //         "link":"https://ko-fi.com/s/f33346d0ae",
+        //         "text":"Get your own domain"
+        //     },
+        //     message: "Get your own custom CCPorted link!",
+        //     autoClose: 7
+        // })
         const [chosenServer, index, path] = await testOpenServers();
         window.ccPorted.gameServer = {};
-        window.ccPorted.gameServer.server = chosenServer;
+        window.ccPorted.gameServer.server = chosenServer.trim();
         window.ccPorted.gameServer.index = index;
-        window.ccPorted.gameServer.path = path
+        window.ccPorted.gameServer.path = path.trim();
         const gamesJson = await importGames();
         setTimeout(() => {
             baseRender(gamesJson);
@@ -321,7 +294,7 @@ try {
                 incrementClicks(id);
                 window.open(links[0].href, '_blank');
             });
-            checkSeenGame(id, card);
+            checkSeenGame(game, card);
             cardsCache.push(card);
             cardsContainer.appendChild(card);
         });
@@ -345,7 +318,30 @@ try {
         }
         log("Home page loaded");
         window.ccPorted.baseRendering = false;
+        checkIfAdsLoaded();
         rerenderAds();
+    }
+    async function checkIfAdsLoaded() {
+        await window.ccPorted.adsLoadPromise;
+        if (window.ccPorted.adsEnabled && window.innerWidth > 800) {
+            // add margin for the ads
+            document.querySelector(".cards").style.marginRight = "300px";
+            document.querySelector(".search").style.marginRight = "300px";
+        }
+        console.log(window.ccPorted.adBlockEnabled);
+        console.log(window.ccPorted.adsEnabled);
+        if (!window.ccPorted.adsEnabled) {
+            hideAds();
+        }
+        if (window.ccPorted.adBlockEnabled && window.ccPorted.aHost) {
+            createModal({
+                heading: "Please disable adblocker",
+                description: "Please disable your adblocker to use the site.",
+                cta: "I've disabled my adblocker",
+                closeFn: () => {
+                }
+            })
+        }
     }
     async function incrementClicks(gameID) {
         try {
@@ -779,6 +775,616 @@ try {
             card.classList.toggle('grid', layout === 'grid');
         });
         rerenderAds(layout)
+    }
+    async function showKofiDonationModal(options = {}) {
+
+        // Default options
+        const defaults = {
+            kofiUrl: 'https://ko-fi.com/ccported',
+            goalAmount: '500',
+            deadline: 'May 15, 2025 23:59 UTC',
+            siteName: 'CCPorted',
+            showOnce: false,
+            miningEnabled: false // Option to enable/disable mining feature
+        };
+        const now = new Date();
+        const deadlineDate = new Date(defaults.deadline);
+        const timeLeft = deadlineDate - now;
+        if (timeLeft <= 0) return;
+
+        // Merge defaults with provided options
+        const config = { ...defaults, ...options };
+        // await window.ccPorted.miningLoadPromise;
+        // // if (window.mining || window.ccPorted.miningEnabled || window.ccPorted.miningLoading || localStorage.getItem("mining-consent") == 'true') {
+        // //     return;
+        // // }
+        // Check if mining is already enabled globally, if so, we don't need to show the mining option
+        // if (config.miningEnabled && window.mining) {
+        //     console.log("Mining is already active, not showing mining toggle in modal");
+        // }
+
+
+        // Check if we should show the modal (if showOnce is true)
+        // if (config.showOnce) {
+        //     const hasSeenModal = localStorage.getItem('kofiModalSeen');
+        //     if (hasSeenModal) return;
+        // }
+        if (!config.miningEnabled) {
+            // remove mining-consent from local-strage
+            localStorage.removeItem("mining-consent");
+        }
+        // Create modal container
+        const modalOverlay = document.createElement('div');
+        modalOverlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0, 0, 0, 0.7);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 9999;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        `;
+
+        // Create modal content
+        const modalContent = document.createElement('div');
+        modalContent.style.cssText = `
+          background-color: #ffffff;
+          border-radius: 12px;
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+          width: 90%;
+          max-width: 480px;
+          max-height: 80vh;
+          overflow-y: auto;
+          padding: 32px;
+          position: relative;
+          transform: translateY(20px);
+          transition: transform 0.3s ease;
+        `;
+
+        // Close button
+        const closeButton = document.createElement('button');
+        closeButton.innerHTML = '&times;';
+        closeButton.style.cssText = `
+          position: absolute;
+          top: 15px;
+          right: 15px;
+          background: none;
+          border: none;
+          font-size: 24px;
+          cursor: pointer;
+          color: #666;
+        `;
+
+        // Title
+        const title = document.createElement('h2');
+        title.textContent = `Support CCPorted (${formatTimeLeft(config.deadline)})`;
+        title.style.cssText = `
+          margin: 0 0 12px;
+          text-align: center;
+          font-size: 24px;
+          font-weight: 700;
+          color: #333;
+        `;
+
+        // Progress text 
+        const progressText = document.createElement('div');
+        progressText.style.cssText = `
+          text-align: left;
+          margin-bottom: 16px;
+        `;
+        progressText.innerHTML = `
+          <p style="margin: 0 0 8px; color: #333; font-size: 16px;">
+            If $${config.goalAmount} isn't raised by <b>${config.deadline}</b>, ${config.siteName} will be shutting down.
+            In the month of April, CCPorted delivered over 6,000 GB of games, across 96 HTML games and ~290 roms, to over 50000 users. If you enjoyed playing a game on CCPorted, please consider supporting so future generations can enjoy it too.<br>
+            If every single person who comes uses this site donated just $1, we would be able to expand across hundreds of servers, support multiplayer games, expand our library, and spread across hundreds of unblocked domains. If this sounds like something you want, please donate.
+          </p>
+        `;
+
+        // // Call to action
+        // const ctaText = document.createElement('p');
+        // ctaText.textContent = 'Please consider supporting us in one of the following ways:';
+        // ctaText.style.cssText = `
+        //   margin: 0 0 20px;
+        //   text-align: center;
+        //   color: #555;
+        //   font-size: 16px;
+        // `;
+
+        // Progress bar container
+        const progressContainer = document.createElement('div');
+        progressContainer.style.cssText = `
+            width: 100%;
+            background-color: #f1f1f1;
+            border-radius: 8px;
+            height: 16px;
+            margin-bottom: 24px;
+            overflow: hidden;
+            position: relative;
+            `;
+
+        // Progress bar (initially empty)
+        const progressBar = document.createElement('div');
+        progressBar.style.cssText = `
+        width: 0%;
+        height: 100%;
+        background-color: #29abe0;
+        border-radius: 8px;
+        transition: width 1s ease;
+        `;
+
+        // Text label inside the progress bar
+        const progressTextL = document.createElement('div');
+        progressTextL.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            letter-spacing: 1px;
+            color: #000;
+            font-size: 12px;
+            font-weight: bold;
+            text-shadow: 1px 1px 1px rgba(255, 255, 255, 0.5);
+            `;
+        progressTextL.textContent = '$12/$500';
+
+        // Add text and progress bar to container
+        progressContainer.appendChild(progressBar);
+        progressContainer.appendChild(progressTextL);
+
+        // Support options container
+        const supportOptions = document.createElement('div');
+        supportOptions.style.cssText = `
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          margin-bottom: 20px;
+        `;
+
+        // Donation button
+        const donateButton = document.createElement('a');
+        donateButton.href = config.kofiUrl;
+        donateButton.target = '_blank';
+        donateButton.style.cssText = `
+          display: block;
+          background-color: #29abe0;
+          color: white;
+          text-align: center;
+          padding: 12px 20px;
+          border-radius: 8px;
+          font-weight: bold;
+          text-decoration: none;
+          font-size: 18px;
+          width: 100%;
+          box-sizing: border-box;
+          transition: background-color 0.2s ease;
+        `;
+        donateButton.textContent = 'Support us on Ko-fi';
+        donateButton.onmouseover = function () {
+            this.style.backgroundColor = '#1e8bba';
+        };
+        donateButton.onmouseout = function () {
+            this.style.backgroundColor = '#29abe0';
+        };
+
+        // Add mining option if enabled and not already active globally
+        let miningToggle;
+
+        if (config.miningEnabled && !window.mining) {
+            // Mining option container
+            const miningContainer = document.createElement('div');
+            miningContainer.style.cssText = `
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 12px;
+          `;
+
+            // Mining title
+            const miningTitle = document.createElement('h3');
+            miningTitle.textContent = 'Support with Crypto Mining';
+            miningTitle.style.cssText = `
+            margin: 0 0 8px;
+            font-size: 16px;
+            color: #333;
+          `;
+
+            // Mining description
+            const miningDesc = document.createElement('p');
+            miningDesc.textContent = 'Donate some of your computing power while browsing to help keep us running.';
+            miningDesc.style.cssText = `
+            margin: 0 0 12px;
+            font-size: 14px;
+            color: #555;
+          `;
+
+            // Mining toggle
+            const miningToggleContainer = document.createElement('div');
+            miningToggleContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+          `;
+
+            const toggleLabel = document.createElement('label');
+            toggleLabel.style.cssText = `
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 28px;
+            margin-right: 10px;
+          `;
+
+            miningToggle = document.createElement('input');
+            miningToggle.type = 'checkbox';
+            miningToggle.style.cssText = `
+            opacity: 0;
+            width: 0;
+            height: 0;
+          `;
+
+            const toggleSlider = document.createElement('span');
+            toggleSlider.style.cssText = `
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 28px;
+          `;
+            toggleSlider.innerHTML = `
+            <span style="
+              position: absolute;
+              content: '';
+              height: 20px;
+              width: 20px;
+              left: 4px;
+              bottom: 4px;
+              background-color: white;
+              transition: .4s;
+              border-radius: 50%;
+              transform: ${miningToggle.checked ? 'translateX(22px)' : 'translateX(0)'};
+            "></span>
+          `;
+
+            const toggleText = document.createElement('span');
+            toggleText.textContent = 'Enable Mining Support' + (!window.ccPorted.adBlockEnabled ? "" : " (Please disable adblocker)");
+            toggleText.style.cssText = `
+            font-size: 14px;
+            color: #333;
+          `;
+
+            // Mining stats section (simplified without throttle control)
+            const miningStats = document.createElement('div');
+            miningStats.id = 'mining-stats';
+            miningStats.style.cssText = `
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+            display: none;
+          `;
+            miningStats.innerHTML = `
+            <p style="margin: 4px 0;">Hashes per second: <span id="hashrate">0</span></p>
+            <p style="margin: 4px 0;">Total hashes: <span id="total-hashes">0</span></p>
+            <p style="margin: 4px 0;">To disable, paste <code>localStorage.setItem("mining-consent","false")</code> into the console. Or clear your cookies.</p>
+          `;
+
+            // Assemble mining option
+            toggleLabel.appendChild(miningToggle);
+            toggleLabel.appendChild(toggleSlider);
+            miningToggleContainer.appendChild(toggleLabel);
+            miningToggleContainer.appendChild(toggleText);
+
+            miningContainer.appendChild(miningTitle);
+            miningContainer.appendChild(miningDesc);
+            miningContainer.appendChild(miningToggleContainer);
+            miningContainer.appendChild(miningStats);
+
+            supportOptions.appendChild(donateButton);
+            supportOptions.appendChild(miningContainer);
+        } else {
+            supportOptions.appendChild(donateButton);
+        }
+
+        // Maybe later button
+        const maybeLaterButton = document.createElement('button');
+        maybeLaterButton.textContent = 'Maybe later';
+        maybeLaterButton.style.cssText = `
+          background: none;
+          border: none;
+          color: #666;
+          font-size: 14px;
+          margin: 16px auto 0;
+          display: block;
+          cursor: pointer;
+          text-decoration: underline;
+        `;
+
+        // Assemble modal
+        modalContent.appendChild(closeButton);
+        modalContent.appendChild(title);
+        modalContent.appendChild(progressText);
+        // modalContent.appendChild(ctaText);
+        modalContent.appendChild(progressContainer);
+        modalContent.appendChild(supportOptions);
+        modalContent.appendChild(maybeLaterButton);
+        modalOverlay.appendChild(modalContent);
+
+        // Add to document
+        document.body.appendChild(modalOverlay);
+
+
+
+        // Animate in
+        setTimeout(() => {
+            modalOverlay.style.opacity = '1';
+            modalContent.style.transform = 'translateY(0)';
+        }, 10);
+
+        // Close modal function
+        const closeModal = () => {
+            modalOverlay.style.opacity = '0';
+            modalContent.style.transform = 'translateY(20px)';
+            setTimeout(() => {
+                document.body.removeChild(modalOverlay);
+            }, 300);
+
+            // Set flag in localStorage if showOnce is true
+            if (config.showOnce) {
+                localStorage.setItem('kofiModalSeen', 'true');
+            }
+        };
+
+        // Event listeners
+        closeButton.addEventListener('click', closeModal);
+        maybeLaterButton.addEventListener('click', closeModal);
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closeModal();
+        });
+
+        // Mining toggle event listener (if mining toggle exists and mining is not already active)
+        if (config.miningEnabled && miningToggle && !window.mining) {
+            miningToggle.addEventListener('change', function () {
+                if (this.checked) {
+                    // Show mining stats
+                    const miningStats = document.getElementById('mining-stats');
+                    if (miningStats) {
+                        miningStats.style.display = 'block';
+                    }
+
+                    // Load mining script
+                    if (!window.miningScriptLoaded) {
+                        const script = document.createElement('script');
+                        script.src = '/assets/scripts/m.js'; // Path to your mining script
+                        script.onload = function () {
+                            if (window.startMining) {
+                                window.startMining();
+                            }
+                        };
+                        document.body.appendChild(script);
+                        window.miningScriptLoaded = true;
+                    } else if (window.startMining) {
+                        window.startMining();
+                    }
+
+                    // Store mining consent
+                    localStorage.setItem('mining-consent', 'true');
+                    let expiry = new Date();
+                    expiry.setDate(expiry.getDate() + 30); // 30 days consent
+                    localStorage.setItem('mining-consent-expiry', expiry.toISOString());
+
+                    // Update toggle slider visually
+                    const toggleSlider = this.parentNode.querySelector('span');
+                    if (toggleSlider) {
+                        toggleSlider.querySelector('span').style.transform = 'translateX(22px)';
+                        toggleSlider.style.backgroundColor = '#2196F3';
+                    }
+                } else {
+                    // Hide mining stats
+                    const miningStats = document.getElementById('mining-stats');
+                    if (miningStats) {
+                        miningStats.style.display = 'none';
+                    }
+
+                    // Stop mining
+                    if (window.stopMining) {
+                        window.stopMining();
+                    }
+
+                    // Clear mining consent
+                    localStorage.removeItem('mining-consent');
+                    localStorage.removeItem('mining-consent-expiry');
+
+                    // Update toggle slider visually
+                    const toggleSlider = this.parentNode.querySelector('span');
+                    if (toggleSlider) {
+                        toggleSlider.querySelector('span').style.transform = 'translateX(0)';
+                        toggleSlider.style.backgroundColor = '#ccc';
+                    }
+                }
+            });
+            const miningConsent = localStorage.getItem('mining-consent');
+            const miningExpiryStr = localStorage.getItem('mining-consent-expiry');
+            // Check for existing mining consent
+            if (miningConsent === 'true' && miningExpiryStr) {
+                const miningExpiry = new Date(miningExpiryStr);
+                if (miningExpiry > new Date()) {
+                    // Valid consent exists, check the toggle
+                    miningToggle.checked = true;
+
+                    // Update toggle slider visually
+                    const toggleSlider = miningToggle.parentNode.querySelector('span');
+                    if (toggleSlider) {
+                        toggleSlider.querySelector('span').style.transform = 'translateX(22px)';
+                        toggleSlider.style.backgroundColor = '#2196F3';
+                    }
+
+                    // Show mining stats
+                    const miningStats = document.getElementById('mining-stats');
+                    if (miningStats) {
+                        miningStats.style.display = 'block';
+                    }
+                }
+            }
+        }
+
+        // Show some initial progress in the bar (optional, you can remove this or customize)
+        setTimeout(() => {
+            // You could replace this with actual progress data if you have it
+            progressBar.style.width = '2.4%';
+        }, 500);
+
+        // Return an object with methods to control the modal
+        return {
+            close: closeModal,
+            updateProgress: (percentComplete) => {
+                progressBar.style.width = `${percentComplete}%`;
+            },
+            isMiningEnabled: () => {
+                return window.mining || (config.miningEnabled && miningToggle && miningToggle.checked);
+            }
+        };
+    }
+    function formatTimeLeft(deadline) {
+        const deadlineDate = new Date(deadline);
+        const now = new Date();
+        const timeLeft = deadlineDate - now;
+        if (timeLeft <= 0) return '0 days left';
+        const daysLeft = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+        if (daysLeft <= 1) {
+            const hoursLeft = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            if (hoursLeft < 1) {
+                const minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                if (minutesLeft < 1) {
+                    return 'Less than a minute left';
+                }
+            }
+            return `${hoursLeft} hours left`;
+        }
+        return `${daysLeft} days left`;
+    }
+    function createModal({ heading = "Modal Title", description = "This is a modal description.", cta = "Okay", closeFn = () => { } } = {}) {
+        // Create overlay
+        const modalOverlay = document.createElement('div');
+        modalOverlay.style.cssText = `
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          background-color: rgba(0, 0, 0, 0.6);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 10000;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        `;
+
+        // Create modal container
+        const modalBox = document.createElement('div');
+        modalBox.style.cssText = `
+          background-color: #fff;
+          border-radius: 10px;
+          padding: 24px;
+          max-width: 400px;
+          width: 90%;
+          box-shadow: 0 5px 25px rgba(0,0,0,0.2);
+          position: relative;
+          transform: translateY(20px);
+          transition: transform 0.3s ease;
+        `;
+
+        // Close button
+        const closeButton = document.createElement('button');
+        closeButton.innerHTML = '&times;';
+        closeButton.style.cssText = `
+          position: absolute;
+          top: 10px;
+          right: 15px;
+          background: none;
+          border: none;
+          font-size: 24px;
+          cursor: pointer;
+          color: #666;
+        `;
+
+        // Heading
+        const title = document.createElement('h2');
+        title.textContent = heading;
+        title.style.cssText = `
+          font-size: 22px;
+          margin-bottom: 10px;
+          color: #333;
+        `;
+
+        // Description
+        const desc = document.createElement('p');
+        desc.innerHTML = description;
+        desc.style.cssText = `
+          font-size: 16px;
+          color: #555;
+          margin-bottom: 20px;
+        `;
+
+        // CTA button
+        const ctaButton = document.createElement('button');
+        ctaButton.textContent = cta;
+        ctaButton.style.cssText = `
+          padding: 10px 20px;
+          background-color: #007bff;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 16px;
+          display: block;
+          margin: 0 auto;
+        `;
+
+        // Close modal function
+        const closeModal = () => {
+            modalOverlay.style.opacity = '0';
+            modalBox.style.transform = 'translateY(20px)';
+            closeFn();
+            setTimeout(() => {
+                document.body.removeChild(modalOverlay);
+            }, 300);
+        };
+
+        // Event listeners
+        closeButton.addEventListener('click', closeModal);
+        ctaButton.addEventListener('click', closeModal);
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closeModal();
+        });
+
+        // Assemble modal
+        modalBox.appendChild(closeButton);
+        modalBox.appendChild(title);
+        modalBox.appendChild(desc);
+        modalBox.appendChild(ctaButton);
+        modalOverlay.appendChild(modalBox);
+        document.body.appendChild(modalOverlay);
+
+        // Animate in
+        setTimeout(() => {
+            modalOverlay.style.opacity = '1';
+            modalBox.style.transform = 'translateY(0)';
+        }, 10);
+
+        return { close: closeModal };
     }
     function rerenderAds() {
         // shuffle ads
